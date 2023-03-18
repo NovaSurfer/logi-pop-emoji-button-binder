@@ -3,8 +3,40 @@
 #include <libudev.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+typedef enum result_t
+{
+    OK,
+    UDEV_NEW_ERR,
+    UDEV_ENUMERATE_ERR,
+    UDEV_DEVICE_LIST_ERR,
+    OPEN_DEVICE_DESCRIPTOR_ERR,
+    BAD_FILE_DESCRIPTOR,
+    DEVICE_NOT_FOUND_ERR,
+
+    RESULT_LENGHT
+} result_t;
+
+typedef struct result_msg_t
+{
+    const char* msg;
+} result_msg_t;
+
+const result_msg_t result_msg[RESULT_LENGHT] = {{"Error while creating new udev"},
+                                                {"Error while creating udev monitor"},
+                                                {"Error while getting device list"},
+                                                {"Error while opening device descriptor"},
+                                                {"Bad file descriptor"},
+                                                {"Device not found"}};
+
+#define log_fatal(res)                                                                             \
+    {                                                                                              \
+        printf("%s. %s\n", result_msg[res - 1].msg, errno ? strerror(errno) : "");                 \
+        quick_exit(res);                                                                           \
+    }
 
 void hid_open(unsigned short vendor_id, unsigned short product_id)
 {
@@ -13,19 +45,16 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
     struct udev_enumerate* enumerate;
     struct udev_list_entry* devices;
     struct udev_list_entry* dev_list_entry;
-    //char device[128];
 
     udev = udev_new();
     if(!udev) {
-        printf("Error while createing new udev\n");
-        // TODO: exit;
+        log_fatal(UDEV_NEW_ERR);
     }
 
     // Create udev monitor
     enumerate = udev_enumerate_new(udev);
     if(!enumerate) {
-        printf("Error while creating udev monitor\n");
-        // TODO: exit;
+        log_fatal(UDEV_ENUMERATE_ERR);
     }
 
     udev_enumerate_add_match_subsystem(enumerate, "hidraw");
@@ -33,8 +62,7 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
     // Create and fill up device list in "hidraw" subsystem
     devices = udev_enumerate_get_list_entry(enumerate);
     if(!devices) {
-        printf("Error while filling up device list\n");
-        // TODO: exit;
+        log_fatal(UDEV_DEVICE_LIST_ERR);
     }
 
     // Iterate over each item and find needed PID & VID
@@ -65,27 +93,27 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                 // Open
                 int fd = open(dev_node_path, O_RDWR | O_CLOEXEC);
                 if(fd < 0) {
-                    printf("Error while opening device descriptor: %s\n", strerror(errno));
-                    // TODO: exit;
+                    log_fatal(OPEN_DEVICE_DESCRIPTOR_ERR);
                 }
 
-                char buf[256];
+                char buf[16];
                 memset(buf, 0x0, sizeof(buf));
 
                 // Read
                 while(1) {
-                    int res = read(fd, buf, 16);
+                    int res = read(fd, buf, sizeof(buf));
                     if(res < 0) {
                         if(errno == EAGAIN || errno == EINPROGRESS) {
                             res = 0;
                         } else {
-                            printf("ERROR: %s\n", strerror(errno));
+                            log_fatal(BAD_FILE_DESCRIPTOR);
                         }
                     } else {
                         for(int i = 0; i < res; ++i) {
                             printf("%hhx", buf[i]);
                         }
                         printf("\n");
+                        printf("Res: %s\n", buf);
                     }
                 }
                 close(fd);
@@ -93,9 +121,10 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                 udev_device_unref(dev);
 
             } else {
-                printf("Device not found\n");
-                // TODO: exit;
+                log_fatal(DEVICE_NOT_FOUND_ERR);
             }
+        } else {
+            log_fatal(DEVICE_NOT_FOUND_ERR);
         }
     }
 
@@ -107,6 +136,6 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
 int main()
 {
     printf("Hello, World!\n");
-    hid_open(0x046d, 0xb030);
+    hid_open(0x046df, 0xb030);
     return 0;
 }
