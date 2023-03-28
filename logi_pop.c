@@ -109,11 +109,11 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                             log_fatal(BAD_FILE_DESCRIPTOR);
                         }
                     } else {
+                        int bytes_sum = 0;
                         for(int i = 0; i < res; ++i) {
-                            printf("%hhx", buf[i]);
+                            bytes_sum += buf[i];
                         }
-                        printf("\n");
-                        printf("Res: %s\n", buf);
+                        printf("Button ID: %x\n", bytes_sum);
                     }
                 }
                 close(fd);
@@ -123,8 +123,6 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
             } else {
                 log_fatal(DEVICE_NOT_FOUND_ERR);
             }
-        } else {
-            log_fatal(DEVICE_NOT_FOUND_ERR);
         }
     }
 
@@ -136,6 +134,6 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
 int main()
 {
     printf("Hello, World!\n");
-    hid_open(0x046df, 0xb030);
+    hid_open(0x046d, 0xb030);
     return 0;
 }
