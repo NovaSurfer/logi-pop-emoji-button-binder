@@ -1,15 +1,49 @@
+#include <X11/Xlib.h>
+#include <X11/extensions/XTest.h>
+#include <X11/keysym.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libudev.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+static void x11_press_key(Display* disp, Window* root, KeySym keysym, KeySym modsym)
+{
+    int state;
+    XGetInputFocus(disp, root, &state);
+
+    long event_mask = KeyPressMask | KeyReleaseMask;
+    XSelectInput(disp, *root, event_mask);
+
+    KeyCode keycode;
+    keycode = XKeysymToKeycode(disp, keysym);
+    if(keycode == 0)
+        return;
+
+    XTestGrabControl(disp, True);
+
+    // Generate modkey press
+    KeyCode modcode;
+    if(modsym != 0) {
+        modcode = XKeysymToKeycode(disp, modsym);
+        XTestFakeKeyEvent(disp, modcode, True, 0);
+    }
+    // Generate regular key press and release
+    XTestFakeKeyEvent(disp, keycode, True, 0);
+    XTestFakeKeyEvent(disp, keycode, False, 0);
+
+    // Generate modkey release
+    if(modsym != 0)
+        XTestFakeKeyEvent(disp, modcode, False, 0);
+
+    XSync(disp, False);
+    XTestGrabControl(disp, False);
+}
+
 typedef enum result_t
 {
-    OK,
     UDEV_NEW_ERR,
     UDEV_ENUMERATE_ERR,
     UDEV_DEVICE_LIST_ERR,
@@ -114,12 +148,17 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                             bytes_sum += buf[i];
                         }
                         printf("Button ID: %x\n", bytes_sum);
+                        if(bytes_sum == 22) {
+                            Display* display = XOpenDisplay(NULL);
+                            Window root = XDefaultRootWindow(display);
+                            x11_press_key(display, &root, XK_Left, XK_Alt_L);
+                        }
                     }
                 }
+                // TODO: Get to that part on program termination
                 close(fd);
                 // free dev
                 udev_device_unref(dev);
-
             } else {
                 log_fatal(DEVICE_NOT_FOUND_ERR);
             }
