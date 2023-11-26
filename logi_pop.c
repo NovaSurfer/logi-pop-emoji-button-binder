@@ -68,7 +68,7 @@ const result_msg_t result_msg[RESULT_LENGHT] = {{"Error while creating new udev"
 
 #define log_fatal(res)                                                                             \
     {                                                                                              \
-        printf("%s. %s\n", result_msg[res - 1].msg, errno ? strerror(errno) : "");                 \
+        printf("%s. %s\n", result_msg[res].msg, errno ? strerror(errno) : "");                     \
         quick_exit(res);                                                                           \
     }
 
@@ -114,7 +114,7 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
         if(hid_start) {
             // and skip 10 bytes (uhid/0005:) with dir name and device bus
             // read the string staring from the device vendor ID.
-            int ret = sscanf(hid_start + 10, "%hx:%hx", &dev_vid, &dev_pid);
+            const int ret = sscanf(hid_start + 10, "%hx:%hx", &dev_vid, &dev_pid);
 
             if(ret == 2 && dev_vid == vendor_id && dev_pid == product_id) {
                 dev = udev_device_new_from_syspath(udev, dev_path);
@@ -125,13 +125,15 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                 printf("Vendor ID: %hx Product ID: %hx\n", dev_vid, dev_pid);
 
                 // Open
-                int fd = open(dev_node_path, O_RDWR | O_CLOEXEC);
+                int fd = open(dev_node_path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
                 if(fd < 0) {
                     log_fatal(OPEN_DEVICE_DESCRIPTOR_ERR);
                 }
 
-                char buf[16];
+                char buf[2];
                 memset(buf, 0x0, sizeof(buf));
+                Display* display = XOpenDisplay(NULL);
+                Window root = XDefaultRootWindow(display);
 
                 // Read
                 while(1) {
@@ -143,14 +145,9 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                             log_fatal(BAD_FILE_DESCRIPTOR);
                         }
                     } else {
-                        int bytes_sum = 0;
-                        for(int i = 0; i < res; ++i) {
-                            bytes_sum += buf[i];
-                        }
-                        printf("Button ID: %x\n", bytes_sum);
-                        if(bytes_sum == 22) {
-                            Display* display = XOpenDisplay(NULL);
-                            Window root = XDefaultRootWindow(display);
+		      // hard coding reading of first 2 bytes
+                        if(buf[0] + buf[1] == 34) {
+                            printf("Emoji button pressed\n");
                             x11_press_key(display, &root, XK_Left, XK_Alt_L);
                         }
                     }
