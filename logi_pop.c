@@ -9,6 +9,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#define log_error(...)                                                                             \
+    {                                                                                              \
+        printf("%s. %s\n", __VA_ARGS__, errno ? strerror(errno) : "");                             \
+    }
+
 static void x11_press_key(Display* disp, Window* root, KeySym keysym, KeySym modsym)
 {
     int state;
@@ -19,8 +24,9 @@ static void x11_press_key(Display* disp, Window* root, KeySym keysym, KeySym mod
 
     KeyCode keycode;
     keycode = XKeysymToKeycode(disp, keysym);
-    if(keycode == 0)
+    if(keycode == 0) {
         return;
+    }
 
     XTestGrabControl(disp, True);
 
@@ -35,69 +41,18 @@ static void x11_press_key(Display* disp, Window* root, KeySym keysym, KeySym mod
     XTestFakeKeyEvent(disp, keycode, False, 0);
 
     // Generate modkey release
-    if(modsym != 0)
+    if(modsym != 0) {
         XTestFakeKeyEvent(disp, modcode, False, 0);
+    }
 
     XSync(disp, False);
     XTestGrabControl(disp, False);
 }
 
-typedef enum result_t
+void hid_open(struct udev* udev, struct udev_list_entry* devices, unsigned short vendor_id,
+              unsigned short product_id)
 {
-    UDEV_NEW_ERR,
-    UDEV_ENUMERATE_ERR,
-    UDEV_DEVICE_LIST_ERR,
-    OPEN_DEVICE_DESCRIPTOR_ERR,
-    BAD_FILE_DESCRIPTOR,
-    DEVICE_NOT_FOUND_ERR,
-
-    RESULT_LENGHT
-} result_t;
-
-typedef struct result_msg_t
-{
-    const char* msg;
-} result_msg_t;
-
-const result_msg_t result_msg[RESULT_LENGHT] = {{"Error while creating new udev"},
-                                                {"Error while creating udev monitor"},
-                                                {"Error while getting device list"},
-                                                {"Error while opening device descriptor"},
-                                                {"Bad file descriptor"},
-                                                {"Device not found"}};
-
-#define log_fatal(res)                                                                             \
-    {                                                                                              \
-        printf("%s. %s\n", result_msg[res].msg, errno ? strerror(errno) : "");                     \
-        quick_exit(res);                                                                           \
-    }
-
-void hid_open(unsigned short vendor_id, unsigned short product_id)
-{
-    struct udev* udev;
-    struct udev_device* dev;
-    struct udev_enumerate* enumerate;
-    struct udev_list_entry* devices;
     struct udev_list_entry* dev_list_entry;
-
-    udev = udev_new();
-    if(!udev) {
-        log_fatal(UDEV_NEW_ERR);
-    }
-
-    // Create udev monitor
-    enumerate = udev_enumerate_new(udev);
-    if(!enumerate) {
-        log_fatal(UDEV_ENUMERATE_ERR);
-    }
-
-    udev_enumerate_add_match_subsystem(enumerate, "hidraw");
-    udev_enumerate_scan_devices(enumerate);
-    // Create and fill up device list in "hidraw" subsystem
-    devices = udev_enumerate_get_list_entry(enumerate);
-    if(!devices) {
-        log_fatal(UDEV_DEVICE_LIST_ERR);
-    }
 
     // Iterate over each item and find needed PID & VID
     udev_list_entry_foreach(dev_list_entry, devices)
@@ -117,7 +72,7 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
             const int ret = sscanf(hid_start + 10, "%hx:%hx", &dev_vid, &dev_pid);
 
             if(ret == 2 && dev_vid == vendor_id && dev_pid == product_id) {
-                dev = udev_device_new_from_syspath(udev, dev_path);
+                struct udev_device* dev = udev_device_new_from_syspath(udev, dev_path);
                 const char* dev_node_path = udev_device_get_devnode(dev);
 
                 printf("dev_path: %s\n", dev_path);
@@ -127,7 +82,7 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                 // Open
                 int fd = open(dev_node_path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
                 if(fd < 0) {
-                    log_fatal(OPEN_DEVICE_DESCRIPTOR_ERR);
+                    log_error("Error while getting device desctiptor");
                 }
 
                 char buf[2];
@@ -142,10 +97,10 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                         if(errno == EAGAIN || errno == EINPROGRESS) {
                             res = 0;
                         } else {
-                            log_fatal(BAD_FILE_DESCRIPTOR);
+                            log_error("Bad file desctiptor");
                         }
                     } else {
-		      // hard coding reading of first 2 bytes
+                        // hard coding reading of first 2 bytes
                         if(buf[0] + buf[1] == 34) {
                             printf("Emoji button pressed\n");
                             x11_press_key(display, &root, XK_Left, XK_Alt_L);
@@ -157,19 +112,41 @@ void hid_open(unsigned short vendor_id, unsigned short product_id)
                 // free dev
                 udev_device_unref(dev);
             } else {
-                log_fatal(DEVICE_NOT_FOUND_ERR);
+                log_error("Device not found");
             }
         }
     }
-
-    // clean up
-    udev_enumerate_unref(enumerate);
-    udev_unref(udev);
 }
 
 int main()
 {
     printf("Hello, World!\n");
-    hid_open(0x046d, 0xb030);
+
+    struct udev* udev = udev_new();
+    if(!udev) {
+        log_error("Error while creating new udev");
+    }
+
+    // Create udev monitor
+    struct udev_enumerate* enumerate = udev_enumerate_new(udev);
+    if(!enumerate) {
+        log_error("Error while creating udev monitor");
+    }
+
+    udev_enumerate_add_match_subsystem(enumerate, "hidraw");
+    udev_enumerate_scan_devices(enumerate);
+
+    // Create and fill up device list in "hidraw" subsystem
+    struct udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+    if(!devices) {
+        log_error("Error while getting device list");
+    } else {
+        hid_open(udev, devices, 0x046d, 0xb030);
+    }
+
+    // clean up
+    udev_enumerate_unref(enumerate);
+    udev_unref(udev);
+
     return 0;
 }
